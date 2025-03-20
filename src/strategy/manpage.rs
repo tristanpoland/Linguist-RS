@@ -2,7 +2,7 @@
 //!
 //! This strategy detects man pages based on file extensions.
 
-use regex::Regex;
+use fancy_regex::Regex;
 
 use crate::blob::BlobHelper;
 use crate::language::Language;
@@ -25,7 +25,7 @@ impl Strategy for Manpage {
         }
         
         // Check if the filename has a manpage extension
-        if MANPAGE_EXTS.is_match(blob.name()) {
+        if MANPAGE_EXTS.is_match(blob.name()).unwrap_or(false) {
             let mut result = Vec::new();
             
             // Add Roff Manpage as the first choice
@@ -55,15 +55,15 @@ mod tests {
     
     #[test]
     fn test_manpage_regex() {
-        assert!(MANPAGE_EXTS.is_match("file.1"));
-        assert!(MANPAGE_EXTS.is_match("file.3"));
-        assert!(MANPAGE_EXTS.is_match("file.man"));
-        assert!(MANPAGE_EXTS.is_match("file.mdoc"));
-        assert!(MANPAGE_EXTS.is_match("file.1.in"));
+        assert!(MANPAGE_EXTS.is_match("file.1").unwrap_or(false));
+        assert!(MANPAGE_EXTS.is_match("file.3").unwrap_or(false));
+        assert!(MANPAGE_EXTS.is_match("file.man").unwrap_or(false));
+        assert!(MANPAGE_EXTS.is_match("file.mdoc").unwrap_or(false));
+        assert!(MANPAGE_EXTS.is_match("file.1.in").unwrap_or(false));
         
-        assert!(!MANPAGE_EXTS.is_match("file.txt"));
-        assert!(!MANPAGE_EXTS.is_match("file.10"));
-        assert!(!MANPAGE_EXTS.is_match("file.c"));
+        assert!(!MANPAGE_EXTS.is_match("file.txt").unwrap_or(false));
+        assert!(!MANPAGE_EXTS.is_match("file.10").unwrap_or(false));
+        assert!(!MANPAGE_EXTS.is_match("file.c").unwrap_or(false));
     }
     
     #[test]

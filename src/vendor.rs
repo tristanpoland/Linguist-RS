@@ -3,7 +3,7 @@
 //! This module provides functionality to identify vendored files,
 //! which are typically third-party libraries or dependencies.
 
-use regex::Regex;
+use fancy_regex::Regex;
 use std::path::Path;
 
 lazy_static::lazy_static! {
@@ -78,7 +78,7 @@ lazy_static::lazy_static! {
 ///
 /// * `bool` - True if the path is a vendored file
 pub fn is_vendored(path: &str) -> bool {
-    VENDOR_REGEX.is_match(path)
+    VENDOR_REGEX.is_match(path).unwrap_or(false)
 }
 
 #[cfg(test)]

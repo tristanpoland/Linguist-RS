@@ -1,0 +1,96 @@
+# Example language definition for Rust
+Rust:
+  type: programming
+  extensions:
+    - .rs
+  interpreters:
+    - rustc
+  language_id: 1
+  color: "#dea584"
+  aliases:
+    - rust-lang
+  tm_scope: source.rust
+  ace_mode: rust
+  codemirror_mode: rust
+  codemirror_mime_type: text/x-rustsrc
+
+# Example for JavaScript
+JavaScript:
+  type: programming
+  extensions:
+    - .js
+    - .javascript
+  interpreters:
+    - node
+    - js
+  language_id: 2
+  color: "#f1e05a"
+  aliases:
+    - js
+  tm_scope: source.js
+  ace_mode: javascript
+  codemirror_mode: javascript
+  codemirror_mime_type: text/javascript
+
+# Example for Python
+Python:
+  type: programming
+  extensions:
+    - .py
+    - .python
+  interpreters:
+    - python
+    - python3
+  language_id: 3
+  color: "#3572A5"
+  aliases:
+    - py
+  tm_scope: source.python
+  ace_mode: python
+  codemirror_mode: python
+  codemirror_mime_type: text/x-python
+
+# Example for XML
+XML:
+  type: markup
+  extensions:
+    - .xml
+  language_id: 4
+  color: "#f1e05a"
+  tm_scope: text.xml
+  ace_mode: xml
+  codemirror_mode: xml
+  codemirror_mime_type: application/xml
+
+# Example for Markdown
+Markdown:
+  type: markup
+  extensions:
+    - .md
+    - .markdown
+  language_id: 5
+  color: "#083fa1"
+  tm_scope: text.markdown
+  ace_mode: markdown
+  codemirror_mode: markdown
+  codemirror_mime_type: text/markdown
+
+# Example specialized language
+Dockerfile:
+  type: programming
+  filenames:
+    - Dockerfile
+  language_id: 6
+  color: "#384d54"
+
+# Example for Objective-C
+Objective-C:
+  type: programming
+  extensions:
+    - .h
+    - .m
+  language_id: 7
+  color: "#438eff"
+  aliases:
+    - objc
+  tm_scope: source.objc

@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use regex::Regex;
+use fancy_regex::Regex;
 
 use crate::blob::BlobHelper;
 use crate::language::Language;
@@ -52,12 +52,12 @@ impl Shebang {
         let first_line = content.lines().next()?;
         
         // Try to extract the interpreter from the shebang
-        if let Some(captures) = SHEBANG_REGEX.captures(first_line) {
+        if let Ok(Some(captures)) = SHEBANG_REGEX.captures(first_line) {
             let mut interpreter = captures.get(1)?.as_str().to_string();
             
             // If using env with arguments
             if interpreter == "env" {
-                if let Some(captures) = ENV_ARGS_REGEX.captures(first_line) {
+                if let Ok(Some(captures)) = ENV_ARGS_REGEX.captures(first_line) {
                     interpreter = captures.get(2)?.as_str().to_string();
                 }
             }
@@ -73,7 +73,7 @@ impl Shebang {
             if interpreter == "sh" {
                 // Look at the first few lines for an exec statement
                 for line in content.lines().take(5) {
-                    if let Some(captures) = EXEC_REGEX.captures(line) {
+                    if let Ok(Some(captures)) = EXEC_REGEX.captures(line) {
                         interpreter = captures.get(1)?.as_str().to_string();
                         break;
                     }

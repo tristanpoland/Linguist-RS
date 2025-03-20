@@ -12,7 +12,7 @@ use std::sync::Arc;
 use encoding_rs::Encoding;
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use memmap2::Mmap;
-use regex::Regex;
+use fancy_regex::Regex;
 
 use crate::generated::Generated;
 use crate::language::Language;
@@ -95,12 +95,12 @@ pub trait BlobHelper {
     
     /// Check if the file is vendored
     fn is_vendored(&self) -> bool {
-        VENDORED_REGEXP.is_match(self.name())
+        VENDORED_REGEXP.is_match(self.name()).unwrap_or(false)
     }
     
     /// Check if the file is documentation
     fn is_documentation(&self) -> bool {
-        DOCUMENTATION_REGEXP.is_match(self.name())
+        DOCUMENTATION_REGEXP.is_match(self.name()).unwrap_or(false)
     }
     
     /// Check if the file is generated

@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use regex::Regex;
+use fancy_regex::Regex;
 
 use crate::blob::BlobHelper;
 use crate::language::Language;
@@ -34,8 +34,8 @@ impl Rule {
     /// Check if the rule matches the given content
     fn matches(&self, content: &str) -> bool {
         match self {
-            Rule::Pattern(regex) => regex.is_match(content),
-            Rule::NegativePattern(regex) => !regex.is_match(content),
+            Rule::Pattern(regex) => regex.is_match(content).unwrap_or(false),
+            Rule::NegativePattern(regex) => !regex.is_match(content).unwrap_or(false),
             Rule::And(rules) => rules.iter().all(|rule| rule.matches(content)),
             Rule::AlwaysMatch => true,
         }
@@ -101,9 +101,15 @@ lazy_static::lazy_static! {
         let cpp_rule = Rule::Pattern(Regex::new(r#"^\s*#\s*include <(cstdint|string|vector|map|list|array|bitset|queue|stack|forward_list|unordered_map|unordered_set|(i|o|io)stream)>"#).unwrap());
         let objective_c_rule = Rule::Pattern(Regex::new(r#"^\s*(@(interface|class|protocol|property|end|synchronised|selector|implementation)\b|#import\s+.+\.h[">])"#).unwrap());
         
-        let cpp_langs = vec![Language::find_by_name("C++").unwrap().clone()];
-        let objc_langs = vec![Language::find_by_name("Objective-C").unwrap().clone()];
-        let c_langs = vec![Language::find_by_name("C").unwrap().clone()];
+        let cpp_langs = Language::find_by_name("C++")
+            .map(|lang| vec![lang.clone()])
+            .unwrap_or_default();
+        let objc_langs = Language::find_by_name("Objective-C")
+            .map(|lang| vec![lang.clone()])
+            .unwrap_or_default();
+        let c_langs = Language::find_by_name("C")
+            .map(|lang| vec![lang.clone()])
+            .unwrap_or_default();
         
         disambiguations.push(Disambiguation {
             extensions: cpp_extensions,

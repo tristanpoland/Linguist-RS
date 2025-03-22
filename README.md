@@ -13,16 +13,6 @@ Linguist-RS is a Rust library designed to detect programming languages in reposi
 - File contents
 - And more
 
-## Features (Planned/Partial)
-
-- [x] Basic language detection strategies
-- [x] Support for multiple detection methods
-- [x] Git repository analysis
-- [x] Filesystem directory analysis
-- [ ] Full test coverage
-- [ ] Performance optimization
-- [ ] Complete language database
-
 ## Installation
 
 Add to your `Cargo.toml`:
@@ -77,7 +67,7 @@ Currently implementing and testing various language detection strategies:
 - [x] Modeline detection
 - [x] XML detection
 - [x] Manpage detection
-- [ ] Heuristics refinement
+- [x] Heuristics refinement
 - [ ] Machine learning classifier
 
 ## Contributing

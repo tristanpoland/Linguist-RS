@@ -91,8 +91,8 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 ## Roadmap
 
-- [ ] Complete test suite
-- [ ] Performance benchmarking
-- [ ] Comprehensive language support
-- [ ] CI/CD pipeline
+- [x] Complete test suite
+- [x] Performance benchmarking
+- [x] Comprehensive language support
+- [x] CI/CD pipeline
 - [ ] Documentation improvements

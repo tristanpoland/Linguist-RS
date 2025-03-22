@@ -2,16 +2,6 @@
 
 A Rust port of GitHub's Linguist for language detection.
 
-## ⚠️ Work in Progress
-
-> [!CAUTION]
-> This project is currently in heavy development and is **NOT** production-ready. 
-> 
-> - Many tests are still in progress
-> - API may change slightly
-> - Performance and accuracy are not yet guaranteed
-> - Not all features of the original GitHub Linguist are implemented
-
 ## Overview
 
 Linguist-RS is a Rust library designed to detect programming languages in repositories, similar to GitHub's Linguist. It provides robust language detection capabilities by analyzing:

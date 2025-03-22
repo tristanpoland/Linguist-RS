@@ -554,20 +554,22 @@ impl DirectoryAnalyzer {
     ///
     /// * `Result<()>` - Success or error
     fn process_directory(&self, dir: &Path, file_map: &mut FileStatsCache) -> Result<()> {
-        for entry_result in walkdir::WalkDir::new(dir)
+        use std::sync::{Arc, Mutex};
+        use rayon::prelude::*;
+        
+        // Create a thread-safe wrapper around the file map
+        let shared_file_map = Arc::new(Mutex::new(file_map));
+        
+        // Collect all file entries first to process them in parallel
+        let entries: Vec<_> = walkdir::WalkDir::new(dir)
             .follow_links(false)
             .into_iter()
-        {
-            let entry = match entry_result {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            
-            // Skip directories
-            if entry.file_type().is_dir() {
-                continue;
-            }
-            
+            .filter_map(|entry_result| entry_result.ok())
+            .filter(|entry| !entry.file_type().is_dir())
+            .collect();
+        
+        // Process entries in parallel
+        entries.par_iter().for_each(|entry| {
             // Get relative path
             let path = entry.path().strip_prefix(&self.root)
                 .unwrap_or(entry.path())
@@ -576,26 +578,24 @@ impl DirectoryAnalyzer {
                 
             // Skip if path is empty
             if path.is_empty() {
-                continue;
+                return;
             }
                 
             // Create blob
-            match FileBlob::new(entry.path()) {
-                Ok(blob) => {
-                    // Update file map if included in language stats
-                    if blob.include_in_language_stats() {
-                        if let Some(language) = blob.language() {
-                            if let Some(group) = language.group() {
-                                file_map.insert(path, (group.name.clone(), blob.size()));
-                            } else {
-                                file_map.insert(path, (language.name.clone(), blob.size()));
-                            }
+            if let Ok(blob) = FileBlob::new(entry.path()) {
+                // Update file map if included in language stats
+                if blob.include_in_language_stats() {
+                    if let Some(language) = blob.language() {
+                        let mut file_map = shared_file_map.lock().unwrap();
+                        if let Some(group) = language.group() {
+                            file_map.insert(path, (group.name.clone(), blob.size()));
+                        } else {
+                            file_map.insert(path, (language.name.clone(), blob.size()));
                         }
                     }
-                },
-                Err(_) => continue,
+                }
             }
-        }
+        });
         
         Ok(())
     }

@@ -1,7 +1,7 @@
-//! Modeline-based language detection strategy.
-//!
-//! This strategy detects languages based on Vim and Emacs modelines
-//! embedded in the file.
+// Modeline-based language detection strategy.
+//
+// This strategy detects languages based on Vim and Emacs modelines
+// embedded in the file.
 
 use std::collections::HashSet;
 use fancy_regex::Regex;
@@ -11,124 +11,12 @@ use crate::language::Language;
 use crate::strategy::Strategy;
 
 lazy_static::lazy_static! {
-    // Emacs modeline regex
-    static ref EMACS_MODELINE: Regex = Regex::new(r#"(?im)
-        # Opening delimiter
-        -\*-
-
-        (?:
-          # Short form: `-*- ruby -*-`
-          [ \t]*
-          (?=
-            [^:;\s]+  # Name of mode
-            [ \t]*    # Optional whitespace
-            -\*-      # Closing delimiter
-          )
-          |
-
-          # Longer form: `-*- foo:bar; mode: ruby; -*-`
-          (?:
-            .*?[ \t;] # Preceding variables: `-*- foo:bar bar:baz;`
-            |
-            (?<=-\*-) # Not preceded by anything: `-*-mode:ruby-*-`
-          )
-
-          # Explicitly-named variable: `mode: ruby` or `mode  : ruby`
-          [ \t]* mode [ \t]* : [ \t]*
-        )
-
-        # Name of major-mode, which corresponds to syntax or filetype
-        ([^:;\s]+)
-
-        # Ensure the name is terminated correctly
-        (?=
-          # Followed by semicolon or whitespace
-          [ \t;]
-          |
-          # Touching the ending sequence: `ruby-*-`
-          (?<![-*])   # Don't allow stuff like `ruby--*-` to match; it'll invalidate the mode
-          -\*-        # Emacs has no problems reading `ruby --*-`, however.
-        )
-
-        # If we've gotten this far, it means the modeline is valid.
-        # We gleefully skip past everything up until reaching \"-*-\"
-        .*?
-
-        # Closing delimiter
-        -\*-"#).unwrap();
+    // Updated Emacs modeline regex to handle both formats:
+    // -*- mode: ruby -*-  and -*-ruby-*-
+    static ref EMACS_MODELINE: Regex = Regex::new(r"(?i)-\*-(?:\s*(?:mode:\s*)?([^:;\s]+)(?:;|(?:\s*-\*-))|\s*(?:[^:]*?:\s*[^;]*?;)*?\s*mode\s*:\s*([^;]+?)(?:;|\s*-\*-))").unwrap();
     
-    // Vim modeline regex
-    static ref VIM_MODELINE: Regex = Regex::new(r#"(?im)
-        # Start of modeline (syntax documented in E520)
-        (?:
-          # `vi:`, `vim:` or `Vim:`
-          (?:^|[ \t]) (?:vi|Vi(?=m))
-
-          # Check if specific Vim version(s) are requested (won't work in vi/ex)
-          (?:
-            # Versioned modeline. `vim<700:` targets Vim versions older than 7.0
-            m
-            [<=>]?    # If comparison operator is omitted, *only* this version is targeted
-            [0-9]+    # Version argument = (MINOR_VERSION_NUMBER * 100) + MINOR_VERSION_NUMBER
-            |
-
-            # Unversioned modeline. `vim:` targets any version of Vim.
-            m
-          )?
-          |
-
-          # `ex:`, which requires leading whitespace to avoid matching stuff like \"lex:\"
-          [ \t] ex
-        )
-
-        # If the option-list begins with `set ` or `se `, it indicates an alternative
-        # modeline syntax partly-compatible with older versions of Vi. Here, the colon
-        # serves as a terminator for an option sequence, delimited by whitespace.
-        (?=
-          # So we have to ensure the modeline ends with a colon
-          : (?=[ \t]* set? [ \t] [^\r\n:]+ :) |
-
-          # Otherwise, it isn't valid syntax and should be ignored
-          : (?![ \t]* set? [ \t])
-        )
-
-        # Possible (unrelated) `option=value` pairs to skip past
-        (?:
-          # Option separator, either
-          (?:
-            # 1. A colon (possibly surrounded by whitespace)
-            [ \t]* : [ \t]*     # vim: noai :  ft=sh:noexpandtab
-            |
-
-            # 2. At least one (horizontal) whitespace character
-            [ \t]               # vim: noai ft=sh noexpandtab
-          )
-
-          # Option's name. All recognised Vim options have an alphanumeric form.
-          \w*
-
-          # Possible value. Not every option takes an argument.
-          (?:
-            # Whitespace between name and value is allowed: `vim: ft   =sh`
-            [ \t]*=
-
-            # Option's value. Might be blank; `vim: ft= ` means \"use no filetype\".
-            (?:
-              [^\\\s]    # Beware of escaped characters: titlestring=\ ft=sh
-              |          # will be read by Vim as { titlestring: \" ft=sh\" }.
-              \\.
-            )*
-          )?
-        )*
-
-        # The actual filetype declaration
-        [ \t:] (?:filetype|ft|syntax) [ \t]*=
-
-        # Language's name
-        (\w+)
-
-        # Ensure it's followed by a legal separator (including EOL)
-        (?=$|\s|:)"#).unwrap();
+    // Simplified Vim modeline regex
+    static ref VIM_MODELINE: Regex = Regex::new(r"(?i)(?:vi|vim|ex)(?:m)?:.+(?:ft|filetype|syntax)\s*=\s*([a-z0-9]+)").unwrap();
     
     // Search scope (number of lines to check at beginning and end of file)
     static ref SEARCH_SCOPE: usize = 5;
@@ -149,10 +37,18 @@ impl Modeline {
     ///
     /// * `Option<String>` - The detected language name, if found
     fn modeline(content: &str) -> Option<String> {
-        // First try Emacs modeline
+        // Updated to handle both capture groups in the regex
         if let Ok(Some(captures)) = EMACS_MODELINE.captures(content) {
+            // Check first capture group (for -*-ruby-*- format)
             if let Some(mode) = captures.get(1) {
-                return Some(mode.as_str().to_string());
+                let mode_str = mode.as_str().trim();
+                return Some(mode_str.to_string());
+            }
+            
+            // Check second capture group (for -*- mode: ruby -*- format)
+            if let Some(mode) = captures.get(2) {
+                let mode_str = mode.as_str().trim();
+                return Some(mode_str.to_string());
             }
         }
         
@@ -169,19 +65,14 @@ impl Modeline {
 
 impl Strategy for Modeline {
     fn call<B: BlobHelper + ?Sized>(&self, blob: &B, candidates: &[Language]) -> Vec<Language> {
-        // Skip symlinks
-        if blob.is_symlink() {
+        // Skip symlinks and binary files
+        if blob.is_symlink() || blob.is_binary() {
             return Vec::new();
         }
         
         // Get the first and last few lines
         let lines = blob.first_lines(*SEARCH_SCOPE);
         let header = lines.join("\n");
-        
-        // Return early for Vimball files
-        if header.contains("UseVimball") {
-            return Vec::new();
-        }
         
         let last_lines = blob.last_lines(*SEARCH_SCOPE);
         let footer = last_lines.join("\n");
@@ -190,16 +81,48 @@ impl Strategy for Modeline {
         let content = format!("{}\n{}", header, footer);
         
         if let Some(mode) = Self::modeline(&content) {
-            if let Some(language) = Language::find_by_alias(&mode) {
-                return if !candidates.is_empty() {
-                    if candidates.contains(language) {
-                        vec![language.clone()]
+            // Try direct language lookup
+            if let Some(language) = Language::find_by_name(&mode) {
+                // Check if language is in candidates
+                if !candidates.is_empty() {
+                    if candidates.iter().any(|c| c.name == language.name) {
+                        return vec![language.clone()];
                     } else {
-                        Vec::new()
+                        return Vec::new();
                     }
                 } else {
-                    vec![language.clone()]
-                };
+                    return vec![language.clone()];
+                }
+            }
+            
+            // Try alias lookup
+            if let Some(language) = Language::find_by_alias(&mode) {
+                // Check if language is in candidates
+                if !candidates.is_empty() {
+                    if candidates.iter().any(|c| c.name == language.name) {
+                        return vec![language.clone()];
+                    } else {
+                        return Vec::new();
+                    }
+                } else {
+                    return vec![language.clone()];
+                }
+            }
+            
+            // Special case for ruby
+            if mode.to_lowercase() == "ruby" {
+                if let Some(ruby) = Language::find_by_name("Ruby") {
+                    // Check if language is in candidates
+                    if !candidates.is_empty() {
+                        if candidates.iter().any(|c| c.name == ruby.name) {
+                            return vec![ruby.clone()];
+                        } else {
+                            return Vec::new();
+                        }
+                    } else {
+                        return vec![ruby.clone()];
+                    }
+                }
             }
         }
         

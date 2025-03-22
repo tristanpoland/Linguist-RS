@@ -111,6 +111,7 @@ impl Language {
     fn init() {
         INIT.call_once(|| {
             unsafe {
+                // Add a mutex or other synchronization here
                 let (langs, name_idx, alias_idx, lang_idx, lang_id_idx, ext_idx, interp_idx, file_idx) = 
                     languages::load_language_data();
                 
@@ -236,26 +237,15 @@ impl Language {
         let lowercase_filename = filename.to_lowercase();
         let path = std::path::Path::new(&lowercase_filename);
         
-        // Extract all extensions (e.g., ".tar.gz" gives [".tar.gz", ".gz"])
-        let mut extensions = Vec::new();
-        let mut current_path = path;
-        
-        while let Some(ext) = current_path.extension() {
-            let full_ext = format!(".{}", ext.to_string_lossy());
-            extensions.push(full_ext);
+        // Extract just the primary extension
+        if let Some(ext) = path.extension() {
+            let ext_str = format!(".{}", ext.to_string_lossy().to_lowercase());
             
-            current_path = match current_path.file_stem() {
-                Some(stem) => std::path::Path::new(stem),
-                None => break,
-            };
-        }
-        
-        // Find the first extension with language definitions
-        for ext in extensions {
             unsafe {
-                if let Some(idxs) = EXTENSION_INDEX.as_ref().unwrap().get(&ext) {
+                if let Some(idxs) = EXTENSION_INDEX.as_ref().unwrap().get(&ext_str) {
                     if !idxs.is_empty() {
-                        return idxs.iter().map(|&idx| &LANGUAGES.as_ref().unwrap()[idx]).collect();
+                        // Only return the first language that matches this extension
+                        return vec![&LANGUAGES.as_ref().unwrap()[idxs[0]]];
                     }
                 }
             }

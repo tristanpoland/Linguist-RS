@@ -113,10 +113,14 @@ mod tests {
     
     #[test]
     fn test_detect_ruby() {
-        let blob = FileBlob::new(Path::new("samples/Ruby/example.rb")).unwrap();
+        // Create a simple Ruby file in memory
+        let content = "#!/usr/bin/env ruby\nputs 'Hello, world!'";
+        let blob = FileBlob::from_data(Path::new("test.rb"), content.as_bytes().to_vec());
+        
         let language = detect(&blob, false).unwrap();
         assert_eq!(language.name, "Ruby");
     }
+    
     
     // Add more tests for different language detection scenarios
 }

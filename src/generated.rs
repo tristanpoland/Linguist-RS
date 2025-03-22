@@ -43,14 +43,24 @@ impl Generated {
     pub fn is_generated(name: &str, data: &[u8]) -> bool {
         // Check filename patterns for known generated files
         if Self::xcode_file(name) || 
-           Self::intellij_file(name) || 
-           Self::cocoapods(name) || 
-           Self::carthage_build(name) || 
-           Self::node_modules(name) ||
-           Self::composer_lock(name) ||
-           Self::cargo_lock(name) ||
-           Self::generated_graphql_relay(name) {
+        Self::intellij_file(name) || 
+        Self::cocoapods(name) || 
+        Self::carthage_build(name) || 
+        Self::node_modules(name) ||
+        Self::composer_lock(name) ||
+        Self::cargo_lock(name) ||
+        Self::generated_graphql_relay(name) {
+         return true;
+        }
+        
+        // Special case for protobuf generated files
+        if name.ends_with(".pb.go") {
             return true;
+        }
+        
+        // Check file content for generated code patterns
+        if data.is_empty() {
+            return false;
         }
         
         // Check file content for generated code patterns

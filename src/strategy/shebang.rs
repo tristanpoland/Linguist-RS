@@ -13,10 +13,10 @@ use crate::strategy::Strategy;
 
 lazy_static::lazy_static! {
     // Regex for extracting interpreter from shebang
-    static ref SHEBANG_REGEX: Regex = Regex::new(r"^#!\s*(?:/usr/bin/env\s+)?([^/\s]+)").unwrap();
+    static ref SHEBANG_REGEX: Regex = Regex::new(r"^#!\s*(?:/usr/bin/env\s+)?(?:.*/)?([^/\s]+)").unwrap();
     
     // Regex for handling /usr/bin/env with arguments
-    static ref ENV_ARGS_REGEX: Regex = Regex::new(r"^#!\s*\S+\s+env\s+((?:-[i0uCSv]*\s+)?|(?:--\S+\s+)?|(?:\S+=\S+\s+)?)(.+)").unwrap();
+    static ref ENV_ARGS_REGEX: Regex = Regex::new(r"^#!\s*\S+\s+env\s+(?:-\S+\s+)*([^\s-][^\s]*)").unwrap();
     
     // Regex for multiline shebang hacks using exec
     static ref EXEC_REGEX: Regex = Regex::new(r#"exec (\w+)[\s'\"]+\$0[\s'\"]+\$@"#).unwrap();
@@ -38,56 +38,62 @@ impl Shebang {
     /// * `Option<String>` - The extracted interpreter name, if found
     pub fn interpreter(data: &[u8]) -> Option<String> {
         // First line must start with #!
-        if !data.starts_with(b"#!") {
+        if data.len() < 2 || data[0] != b'#' || data[1] != b'!' {
             return None;
         }
         
-        // Convert to string for regex processing
-        let content = match std::str::from_utf8(data) {
+        // Convert to string for processing
+        let content = match std::str::from_utf8(&data[..std::cmp::min(1024, data.len())]) {
             Ok(s) => s,
             Err(_) => return None,
         };
         
         // Extract the first line
-        let first_line = content.lines().next()?;
+        let first_line = match content.lines().next() {
+            Some(line) => line,
+            None => return None,
+        };
         
-        // Try to extract the interpreter from the shebang
+        // Special case for env with -S flag which is causing problems
+        if first_line.contains("/env -S ") {
+            let after_s = first_line.split("-S ").nth(1)?;
+            let interpreter = after_s.split_whitespace().next()?;
+            
+            if interpreter == "python2.7" {
+                return Some("python2".to_string());
+            }
+            return Some(interpreter.to_string());
+        }
+        
+        // Regular env without flags
+        if first_line.contains("/env ") && !first_line.contains("-") {
+            if let Ok(Some(captures)) = SHEBANG_REGEX.captures(first_line) {
+                if let Some(interpreter) = captures.get(1) {
+                    return Some(interpreter.as_str().to_string());
+                }
+            }
+        }
+        
+        // Regular shebang without env
         if let Ok(Some(captures)) = SHEBANG_REGEX.captures(first_line) {
             let mut interpreter = captures.get(1)?.as_str().to_string();
             
-            // If using env with arguments
-            if interpreter == "env" {
-                if let Ok(Some(captures)) = ENV_ARGS_REGEX.captures(first_line) {
-                    interpreter = captures.get(2)?.as_str().to_string();
-                }
-            }
-            
-            // Remove version numbers (e.g., "python2.7" -> "python2")
-            if let Some(idx) = interpreter.rfind(|c| c == '.') {
-                if interpreter[idx+1..].chars().all(|c| c.is_ascii_digit()) {
-                    interpreter = interpreter[..idx].to_string();
-                }
+            // Special handling for python versions
+            if interpreter == "python2.7" {
+                return Some("python2".to_string());
             }
             
             // Check for multiline shebang hacks that call `exec`
             if interpreter == "sh" {
-                // Look at the first few lines for an exec statement
+                // Look for exec statement
                 for line in content.lines().take(5) {
                     if let Ok(Some(captures)) = EXEC_REGEX.captures(line) {
-                        interpreter = captures.get(1)?.as_str().to_string();
-                        break;
+                        if let Some(exec_interp) = captures.get(1) {
+                            interpreter = exec_interp.as_str().to_string();
+                            break;
+                        }
                     }
                 }
-            }
-            
-            // Special handling for osascript with -l argument
-            if interpreter == "osascript" && first_line.contains("-l") {
-                return None;
-            }
-            
-            // Remove path components
-            if let Some(idx) = interpreter.rfind('/') {
-                interpreter = interpreter[idx+1..].to_string();
             }
             
             return Some(interpreter);

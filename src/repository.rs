@@ -580,13 +580,20 @@ impl DirectoryAnalyzer {
             }
                 
             // Create blob
-            let blob = FileBlob::new(entry.path())?;
-            
-            // Update file map if included in language stats
-            if blob.include_in_language_stats() {
-                if let Some(language) = blob.language() {
-                    file_map.insert(path, (language.group().unwrap().name.clone(), blob.size()));
-                }
+            match FileBlob::new(entry.path()) {
+                Ok(blob) => {
+                    // Update file map if included in language stats
+                    if blob.include_in_language_stats() {
+                        if let Some(language) = blob.language() {
+                            if let Some(group) = language.group() {
+                                file_map.insert(path, (group.name.clone(), blob.size()));
+                            } else {
+                                file_map.insert(path, (language.name.clone(), blob.size()));
+                            }
+                        }
+                    }
+                },
+                Err(_) => continue,
             }
         }
         

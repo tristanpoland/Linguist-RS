@@ -29,7 +29,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-linguist = { git = "https://github.com/yourusername/linguist-rs" }
+linguist = { git = "https://github.com/tristanpoland/linguist-rs" }
 ```
 
 ## Usage Examples

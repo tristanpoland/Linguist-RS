@@ -14,7 +14,7 @@ lazy_static::lazy_static! {
 }
 
 /// Manpage detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Manpage;
 
 impl Strategy for Manpage {

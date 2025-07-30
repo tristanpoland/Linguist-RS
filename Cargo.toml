@@ -36,6 +36,18 @@ rayon = "1.7"  # For parallel processing
 thiserror = "1.0"  # Better error handling
 clap = { version = "4.3", features = ["derive"] } # Command line argument parsing
 
+# Multithreading and concurrency
+tokio = { version = "1.0", features = ["full"] }  # Async runtime
+futures = "0.3"  # Async utilities
+crossbeam = "0.8"  # Advanced concurrency utilities
+crossbeam-channel = "0.5"  # Multi-producer multi-consumer channels
+arc-swap = "1.6"  # Lock-free atomic reference counting
+dashmap = "5.5"  # Concurrent hash map
+parking_lot = "0.12"  # Fast synchronization primitives
+threadpool = "1.8"  # Thread pool implementation
+num_cpus = "1.0"  # CPU core detection
+log = "0.4"  # Logging framework
+
 blob = "0.3.0"  # For handling binary data
 
 [dev-dependencies]

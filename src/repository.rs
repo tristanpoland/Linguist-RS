@@ -8,8 +8,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use git2::{Repository as GitRepository, Tree, Oid, ObjectType, FileMode};
+use rayon::prelude::*;
+use crossbeam_channel::{bounded, unbounded};
+use dashmap::DashMap;
+use parking_lot::RwLock;
 
 use crate::blob::{BlobHelper, LazyBlob, FileBlob};
+use crate::threading::{ThreadPoolManager, ThreadingConfig};
 use crate::{Error, Result};
 
 // Maximum repository tree size to consider for analysis
@@ -53,6 +58,12 @@ pub struct Repository {
     
     /// Analysis cache
     cache: Option<FileStatsCache>,
+    
+    /// Thread pool for parallel processing
+    thread_pool: Option<Arc<ThreadPoolManager>>,
+    
+    /// Concurrent cache for thread-safe operations
+    concurrent_cache: Arc<DashMap<String, (String, usize)>>,
 }
 
 impl Repository {
@@ -78,6 +89,32 @@ impl Repository {
             old_commit_oid: None,
             old_stats: None,
             cache: None,
+            thread_pool: None,
+            concurrent_cache: Arc::new(DashMap::new()),
+        })
+    }
+    
+    /// Create a new Repository with custom threading configuration
+    pub fn with_threading<P: AsRef<Path>>(
+        repo_path: P, 
+        commit_oid_str: &str, 
+        max_tree_size: Option<usize>,
+        threading_config: ThreadingConfig
+    ) -> Result<Self> {
+        let repo = GitRepository::open(repo_path)?;
+        let commit_oid = Oid::from_str(commit_oid_str)?;
+        let thread_pool = Arc::new(ThreadPoolManager::new(threading_config));
+        thread_pool.start();
+        
+        Ok(Self {
+            repo: Arc::new(repo),
+            commit_oid,
+            max_tree_size: max_tree_size.unwrap_or(MAX_TREE_SIZE),
+            old_commit_oid: None,
+            old_stats: None,
+            cache: None,
+            thread_pool: Some(thread_pool),
+            concurrent_cache: Arc::new(DashMap::new()),
         })
     }
     
@@ -112,6 +149,8 @@ impl Repository {
             old_commit_oid: Some(old_commit_oid),
             old_stats: Some(old_stats),
             cache: None,
+            thread_pool: None,
+            concurrent_cache: Arc::new(DashMap::new()),
         })
     }
     
@@ -350,10 +389,93 @@ impl Repository {
         } else {
             // Full scan if no previous stats
             let tree = self.get_tree(self.commit_oid)?;
-            self.process_tree(&tree, "", &mut file_map)?;
+            
+            // Use parallel processing if thread pool is available
+            if self.thread_pool.is_some() {
+                self.process_tree_parallel(&tree, "")?;
+                // Copy results from concurrent cache to file_map
+                for entry in self.concurrent_cache.iter() {
+                    file_map.insert(entry.key().clone(), entry.value().clone());
+                }
+            } else {
+                self.process_tree(&tree, "", &mut file_map)?;
+            }
         }
         
         Ok(file_map)
+    }
+    
+    /// Process a tree recursively with parallel processing
+    ///
+    /// # Arguments
+    ///
+    /// * `tree` - The Git tree
+    /// * `prefix` - Path prefix for entries
+    ///
+    /// # Returns
+    ///
+    /// * `Result<()>` - Success or error
+    fn process_tree_parallel(&self, tree: &Tree, prefix: &str) -> Result<()> {
+        // Collect all blob entries first
+        let mut blob_entries = Vec::new();
+        let mut tree_entries = Vec::new();
+        
+        for entry in tree.iter() {
+            let name = entry.name().unwrap_or_default();
+            let path = if prefix.is_empty() {
+                name.to_string()
+            } else {
+                format!("{}/{}", prefix, name)
+            };
+            
+            match entry.kind() {
+                Some(ObjectType::Tree) => {
+                    tree_entries.push((entry.id(), path));
+                },
+                Some(ObjectType::Blob) => {
+                    // Skip submodules and symlinks
+                    let mode = entry.filemode();
+                    if mode != FileMode::Link as i32 && mode != FileMode::Commit as i32 {
+                        blob_entries.push((entry.id(), path, mode));
+                    }
+                },
+                _ => (), // Skip other types
+            }
+        }
+        
+        // Process blobs in parallel (using sequential processing for git repo due to thread safety)
+        if !blob_entries.is_empty() {
+            let concurrent_cache = self.concurrent_cache.clone();
+            
+            // Note: git2::Repository is not Send+Sync, so we process sequentially but still update concurrent cache
+            for (oid, path, mode) in blob_entries {
+                let mode_str = format!("{:o}", mode);
+                let blob = LazyBlob::new(
+                    self.repo.clone(),
+                    oid,
+                    path.clone(),
+                    Some(mode_str)
+                );
+                
+                // Update concurrent cache if included in language stats
+                if blob.include_in_language_stats() {
+                    if let Some(language) = blob.language() {
+                        let group_name = language.group()
+                            .map(|g| g.name.clone())
+                            .unwrap_or(language.name.clone());
+                        concurrent_cache.insert(path, (group_name, blob.size()));
+                    }
+                }
+            }
+        }
+        
+        // Process subtrees recursively
+        for (tree_oid, path) in tree_entries {
+            let subtree = self.repo.find_tree(tree_oid)?;
+            self.process_tree_parallel(&subtree, &path)?;
+        }
+        
+        Ok(())
     }
     
     /// Process a tree recursively
@@ -498,6 +620,12 @@ pub struct DirectoryAnalyzer {
     
     /// Analysis cache
     cache: Option<FileStatsCache>,
+    
+    /// Thread pool for parallel processing
+    thread_pool: Option<Arc<ThreadPoolManager>>,
+    
+    /// Concurrent cache for thread-safe operations
+    concurrent_cache: Arc<DashMap<String, (String, usize)>>,
 }
 
 impl DirectoryAnalyzer {
@@ -514,6 +642,21 @@ impl DirectoryAnalyzer {
         Self {
             root: root.as_ref().to_path_buf(),
             cache: None,
+            thread_pool: None,
+            concurrent_cache: Arc::new(DashMap::new()),
+        }
+    }
+    
+    /// Create a new DirectoryAnalyzer with custom threading
+    pub fn with_threading<P: AsRef<Path>>(root: P, threading_config: ThreadingConfig) -> Self {
+        let thread_pool = Arc::new(ThreadPoolManager::new(threading_config));
+        thread_pool.start();
+        
+        Self {
+            root: root.as_ref().to_path_buf(),
+            cache: None,
+            thread_pool: Some(thread_pool),
+            concurrent_cache: Arc::new(DashMap::new()),
         }
     }
     
@@ -543,7 +686,7 @@ impl DirectoryAnalyzer {
         })
     }
     
-    /// Process a directory recursively
+    /// Process a directory recursively with enhanced parallel processing
     ///
     /// # Arguments
     ///
@@ -554,19 +697,86 @@ impl DirectoryAnalyzer {
     ///
     /// * `Result<()>` - Success or error
     fn process_directory(&self, dir: &Path, file_map: &mut FileStatsCache) -> Result<()> {
-        use std::sync::{Arc, Mutex};
-        use rayon::prelude::*;
-        
-        // Create a thread-safe wrapper around the file map
-        let shared_file_map = Arc::new(Mutex::new(file_map));
-        
-        // Collect all file entries first to process them in parallel
+        // Collect all file entries first
         let entries: Vec<_> = walkdir::WalkDir::new(dir)
             .follow_links(false)
             .into_iter()
             .filter_map(|entry_result| entry_result.ok())
             .filter(|entry| !entry.file_type().is_dir())
             .collect();
+        
+        if let Some(thread_pool) = &self.thread_pool {
+            // Use advanced thread pool for processing
+            self.process_with_thread_pool(&entries, thread_pool)?;
+            
+            // Copy results from concurrent cache to file_map
+            for entry in self.concurrent_cache.iter() {
+                file_map.insert(entry.key().clone(), entry.value().clone());
+            }
+        } else {
+            // Fallback to basic Rayon parallel processing
+            self.process_with_rayon(&entries, file_map)?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Process entries using the advanced thread pool
+    fn process_with_thread_pool(
+        &self, 
+        entries: &[walkdir::DirEntry], 
+        thread_pool: &ThreadPoolManager
+    ) -> Result<()> {
+        // Process in batches for better load balancing
+        let batch_size = 50;
+        let concurrent_cache = self.concurrent_cache.clone();
+        let root = self.root.clone();
+        
+        for chunk in entries.chunks(batch_size) {
+            let blobs: Vec<Arc<dyn BlobHelper + Send + Sync>> = chunk
+                .iter()
+                .filter_map(|entry| {
+                    FileBlob::new(entry.path())
+                        .ok()
+                        .map(|blob| Arc::new(blob) as Arc<dyn BlobHelper + Send + Sync>)
+                })
+                .collect();
+                
+            if !blobs.is_empty() {
+                let receiver = thread_pool.batch_process_async(blobs);
+                if let Ok(results) = receiver.recv() {
+                    for (full_path, language) in results {
+                        // Convert to relative path
+                        let relative_path = std::path::Path::new(&full_path)
+                            .strip_prefix(&root)
+                            .unwrap_or(std::path::Path::new(&full_path))
+                            .to_string_lossy()
+                            .to_string();
+                            
+                        if let Some(lang) = language {
+                            let group_name = lang.group()
+                                .map(|g| g.name.clone())
+                                .unwrap_or(lang.name.clone());
+                            let size = std::fs::metadata(&full_path)
+                                .map(|m| m.len() as usize)
+                                .unwrap_or(0);
+                            concurrent_cache.insert(relative_path, (group_name, size));
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Process entries using basic Rayon parallel processing
+    fn process_with_rayon(&self, entries: &[walkdir::DirEntry], file_map: &mut FileStatsCache) -> Result<()> {
+        use std::sync::{Arc, Mutex};
+        use rayon::prelude::*;
+        
+        // Create a thread-safe wrapper around the file map
+        let shared_file_map = Arc::new(Mutex::new(file_map));
         
         // Process entries in parallel
         entries.par_iter().for_each(|entry| {

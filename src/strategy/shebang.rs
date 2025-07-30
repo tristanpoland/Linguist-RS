@@ -23,7 +23,7 @@ lazy_static::lazy_static! {
 }
 
 /// Shebang-based language detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Shebang;
 
 impl Shebang {

@@ -10,9 +10,11 @@ pub mod heuristics;
 pub mod language;
 pub mod repository;
 pub mod strategy;
+pub mod threading;
 pub mod vendor;
 pub mod data;
 
+use std::sync::Arc;
 use language::Language;
 use strategy::{Strategy, StrategyType};
 
@@ -103,6 +105,56 @@ pub fn detect<B: BlobHelper + ?Sized>(blob: &B, allow_empty: bool) -> Option<Lan
     } else {
         None
     }
+}
+
+/// Detects the language of a blob using parallel strategy execution.
+///
+/// # Arguments
+///
+/// * `blob` - A blob object implementing the BlobHelper trait
+/// * `allow_empty` - Whether to allow empty files
+///
+/// # Returns
+///
+/// * `Option<Language>` - The detected language or None if undetermined
+pub fn detect_parallel<B: BlobHelper + Send + Sync + 'static>(blob: Arc<B>, allow_empty: bool) -> Option<Language> {
+    use threading::ParallelStrategyExecutor;
+    use futures::executor::block_on;
+    
+    // Bail early if the blob is binary or empty
+    if blob.likely_binary() || blob.is_binary() || (!allow_empty && blob.is_empty()) {
+        return None;
+    }
+    
+    // Use parallel strategy execution
+    let executor = ParallelStrategyExecutor::new(threading::ThreadingConfig::default());
+    let strategies = STRATEGIES.clone();
+    
+    let results = block_on(executor.execute_strategies_parallel(blob, strategies));
+    
+    // Return the first language found
+    results.into_iter().next()
+}
+
+/// Batch detect languages for multiple blobs in parallel
+///
+/// # Arguments
+///
+/// * `blobs` - Vector of blobs to analyze
+/// * `allow_empty` - Whether to allow empty files
+///
+/// # Returns
+///
+/// * `Vec<Option<Language>>` - Detected languages for each blob
+pub fn detect_batch_parallel<B: BlobHelper + Send + Sync + 'static>(
+    blobs: Vec<Arc<B>>, 
+    allow_empty: bool
+) -> Vec<Option<Language>> {
+    use rayon::prelude::*;
+    
+    blobs.par_iter()
+        .map(|blob| detect_parallel(blob.clone(), allow_empty))
+        .collect()
 }
 
 #[cfg(test)]

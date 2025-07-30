@@ -22,7 +22,7 @@ lazy_static::lazy_static! {
 }
 
 /// Extension-based language detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Extension;
 
 impl Extension {

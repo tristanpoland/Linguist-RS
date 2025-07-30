@@ -147,7 +147,7 @@ lazy_static::lazy_static! {
 }
 
 /// Heuristics language detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Heuristics;
 
 impl Strategy for Heuristics {

@@ -23,7 +23,7 @@ lazy_static::lazy_static! {
 }
 
 /// Modeline-based language detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Modeline;
 
 impl Modeline {

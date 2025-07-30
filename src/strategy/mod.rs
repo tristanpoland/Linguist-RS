@@ -14,7 +14,7 @@ use crate::blob::BlobHelper;
 use crate::language::Language;
 
 /// Enum-based language detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StrategyType {
     /// Modeline-based strategy
     Modeline(modeline::Modeline),

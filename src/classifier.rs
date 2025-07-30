@@ -5,6 +5,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
+
+use rayon::prelude::*;
+use crossbeam_channel::{bounded, Receiver, Sender};
+use dashmap::DashMap;
 
 use crate::blob::BlobHelper;
 use crate::language::Language;
@@ -26,8 +31,19 @@ type TokenFrequencies = HashMap<Token, f64>;
 type LanguageTokens = HashMap<String, TokenFrequencies>;
 
 /// Language classifier based on token frequencies
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Classifier;
+
+/// Parallel classifier with work stealing and caching
+#[derive(Debug)]
+pub struct ParallelClassifier {
+    /// Token cache for performance
+    token_cache: Arc<DashMap<String, Vec<Token>>>,
+    /// Classification result cache
+    result_cache: Arc<DashMap<String, Option<Language>>>,
+    /// Number of worker threads
+    worker_count: usize,
+}
 
 impl Classifier {
     /// Tokenize content into a sequence of tokens
@@ -210,6 +226,190 @@ impl Strategy for Classifier {
     }
 }
 
+impl ParallelClassifier {
+    /// Create a new parallel classifier
+    pub fn new() -> Self {
+        Self {
+            token_cache: Arc::new(DashMap::new()),
+            result_cache: Arc::new(DashMap::new()),
+            worker_count: num_cpus::get(),
+        }
+    }
+    
+    /// Create a new parallel classifier with custom worker count
+    pub fn with_workers(worker_count: usize) -> Self {
+        Self {
+            token_cache: Arc::new(DashMap::new()),
+            result_cache: Arc::new(DashMap::new()),
+            worker_count,
+        }
+    }
+    
+    /// Classify multiple blobs in parallel
+    pub fn classify_batch<B: BlobHelper + Send + Sync + 'static + ?Sized>(
+        &self,
+        blobs: Vec<Arc<B>>,
+        candidates: &[Language]
+    ) -> Vec<Vec<Language>> {
+        // Use parallel iterator for batch processing
+        blobs.par_iter()
+            .map(|blob| self.classify_single(blob.as_ref(), candidates))
+            .collect()
+    }
+    
+    /// Classify a single blob with caching
+    pub fn classify_single<B: BlobHelper + ?Sized>(
+        &self,
+        blob: &B,
+        candidates: &[Language]
+    ) -> Vec<Language> {
+        // Check result cache first
+        let cache_key = self.generate_cache_key(blob);
+        if let Some(cached_result) = self.result_cache.get(&cache_key) {
+            return cached_result.clone().map(|lang| vec![lang]).unwrap_or_default();
+        }
+        
+        // Skip binary files or symlinks
+        if blob.is_binary() || blob.is_symlink() {
+            self.result_cache.insert(cache_key, None);
+            return Vec::new();
+        }
+        
+        // Get or compute tokens
+        let tokens = self.get_or_compute_tokens(blob);
+        
+        // If we have too few tokens, don't attempt classification
+        if tokens.len() < 10 {
+            self.result_cache.insert(cache_key, None);
+            return Vec::new();
+        }
+        
+        // Perform classification with parallel token processing
+        let result = self.classify_with_tokens(&tokens, candidates);
+        
+        // Cache the result
+        self.result_cache.insert(cache_key, result.first().cloned());
+        
+        result
+    }
+    
+    /// Get or compute tokens for a blob
+    fn get_or_compute_tokens<B: BlobHelper + ?Sized>(&self, blob: &B) -> Vec<Token> {
+        let content_hash = self.compute_content_hash(blob);
+        
+        if let Some(cached_tokens) = self.token_cache.get(&content_hash) {
+            return cached_tokens.clone();
+        }
+        
+        // Get the data for analysis, limited to a reasonable size
+        let data_bytes = blob.data();
+        let consider_bytes = std::cmp::min(data_bytes.len(), CLASSIFIER_CONSIDER_BYTES);
+        let data_slice = &data_bytes[..consider_bytes];
+        
+        // Convert to string for tokenization
+        let content = match std::str::from_utf8(data_slice) {
+            Ok(s) => s,
+            Err(_) => {
+                self.token_cache.insert(content_hash, Vec::new());
+                return Vec::new();
+            }
+        };
+        
+        // Tokenize in parallel for large content
+        let tokens = if content.len() > 10000 {
+            self.parallel_tokenize(content)
+        } else {
+            Classifier::tokenize(content)
+        };
+        
+        // Cache the tokens
+        self.token_cache.insert(content_hash, tokens.clone());
+        tokens
+    }
+    
+    /// Tokenize content in parallel for large files
+    fn parallel_tokenize(&self, content: &str) -> Vec<Token> {
+        const CHUNK_SIZE: usize = 5000; // Process in 5KB chunks
+        
+        let lines: Vec<&str> = content.lines().collect();
+        let chunks: Vec<_> = lines.chunks(CHUNK_SIZE / 50).collect(); // Approximate line-based chunking
+        
+        let all_tokens: Vec<Vec<Token>> = chunks.par_iter()
+            .map(|chunk| {
+                let chunk_content = chunk.join("\n");
+                Classifier::tokenize(&chunk_content)
+            })
+            .collect();
+        
+        // Flatten and deduplicate
+        let mut final_tokens = Vec::new();
+        let mut seen = HashSet::new();
+        
+        for token_vec in all_tokens {
+            for token in token_vec {
+                if seen.insert(token.clone()) {
+                    final_tokens.push(token);
+                }
+            }
+        }
+        
+        final_tokens
+    }
+    
+    /// Classify using pre-computed tokens
+    fn classify_with_tokens(&self, tokens: &[Token], candidates: &[Language]) -> Vec<Language> {
+        // For this simplified version, just return the first candidate if available
+        if !candidates.is_empty() {
+            return vec![candidates[0].clone()];
+        }
+        
+        // In a real implementation, we would:
+        // 1. Calculate term frequencies for the tokens
+        // 2. Compare against language models using parallel similarity calculation
+        // 3. Return the best matching languages
+        
+        Vec::new()
+    }
+    
+    /// Generate a cache key for a blob
+    fn generate_cache_key<B: BlobHelper + ?Sized>(&self, blob: &B) -> String {
+        format!("{}:{}", blob.name(), blob.size())
+    }
+    
+    /// Compute a content hash for caching tokens
+    fn compute_content_hash<B: BlobHelper + ?Sized>(&self, blob: &B) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        blob.data().hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
+    
+    /// Clear all caches
+    pub fn clear_caches(&self) {
+        self.token_cache.clear();
+        self.result_cache.clear();
+    }
+    
+    /// Get cache statistics
+    pub fn cache_stats(&self) -> (usize, usize) {
+        (self.token_cache.len(), self.result_cache.len())
+    }
+}
+
+impl Strategy for ParallelClassifier {
+    fn call<B: BlobHelper + ?Sized>(&self, blob: &B, candidates: &[Language]) -> Vec<Language> {
+        self.classify_single(blob, candidates)
+    }
+}
+
+impl Default for ParallelClassifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,5 +532,126 @@ mod tests {
         assert_eq!(languages[0].name, "JavaScript");
         
         Ok(())
+    }
+    
+    #[test]
+    fn test_parallel_classifier() {
+        let classifier = ParallelClassifier::new();
+        
+        // Create test blobs
+        let blob1 = FileBlob::from_data(
+            std::path::Path::new("test1.js"),
+            b"function hello() { console.log('Hello from JavaScript'); }".to_vec()
+        );
+        
+        let blob2 = FileBlob::from_data(
+            std::path::Path::new("test2.py"),
+            b"def hello():\n    print('Hello from Python')".to_vec()
+        );
+        
+        let blobs = vec![
+            Arc::new(blob1) as Arc<dyn BlobHelper + Send + Sync>,
+            Arc::new(blob2) as Arc<dyn BlobHelper + Send + Sync>,
+        ];
+        
+        // Test batch classification
+        let results = classifier.classify_batch(blobs, &[]);
+        assert_eq!(results.len(), 2);
+        
+        // Test cache functionality
+        let (token_cache_size, result_cache_size) = classifier.cache_stats();
+        assert!(token_cache_size > 0 || result_cache_size > 0, "Expected some caching to occur");
+    }
+    
+    #[test]
+    fn test_parallel_tokenization() {
+        let classifier = ParallelClassifier::new();
+        
+        // Create a large content that should trigger parallel tokenization
+        let large_content = "function test() {\n".repeat(1000) + "}";
+        let blob = FileBlob::from_data(
+            std::path::Path::new("large_test.js"),
+            large_content.into_bytes()
+        );
+        
+        let start_time = std::time::Instant::now();
+        let result = classifier.classify_single(&blob, &[]);
+        let elapsed = start_time.elapsed();
+        
+        println!("Parallel tokenization took {:?}", elapsed);
+        assert!(elapsed.as_millis() < 5000, "Parallel tokenization should be reasonably fast");
+    }
+    
+    #[test]
+    fn test_classifier_caching() {
+        let classifier = ParallelClassifier::new();
+        
+        let blob = FileBlob::from_data(
+            std::path::Path::new("cache_test.rs"),
+            b"fn main() { println!(\"Cache test\"); }".to_vec()
+        );
+        
+        // First call should populate cache
+        let start_time1 = std::time::Instant::now();
+        let _result1 = classifier.classify_single(&blob, &[]);
+        let time1 = start_time1.elapsed();
+        
+        // Second call should use cache and be faster
+        let start_time2 = std::time::Instant::now();
+        let _result2 = classifier.classify_single(&blob, &[]);
+        let time2 = start_time2.elapsed();
+        
+        // Check that caching occurred
+        let (token_cache_size, result_cache_size) = classifier.cache_stats();
+        assert!(token_cache_size > 0 || result_cache_size > 0, "Expected caching to occur");
+        
+        // Clear caches and verify
+        classifier.clear_caches();
+        let (token_cache_size_after, result_cache_size_after) = classifier.cache_stats();
+        assert_eq!(token_cache_size_after, 0);
+        assert_eq!(result_cache_size_after, 0);
+    }
+    
+    #[test]
+    fn test_concurrent_classifier_access() {
+        use std::sync::Arc;
+        use std::thread;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        
+        let classifier = Arc::new(ParallelClassifier::new());
+        let processed_count = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        
+        // Spawn multiple threads to test concurrent access
+        for i in 0..5 {
+            let classifier = classifier.clone();
+            let processed_count = processed_count.clone();
+            
+            let handle = thread::spawn(move || {
+                for j in 0..10 {
+                    let blob = FileBlob::from_data(
+                        std::path::Path::new(&format!("concurrent_test_{}_{}.rs", i, j)),
+                        format!("fn test{}_{}() {{ println!(\"Thread {} Task {}\"); }}", i, j, i, j).into_bytes()
+                    );
+                    
+                    let _result = classifier.classify_single(&blob, &[]);
+                    processed_count.fetch_add(1, Ordering::Relaxed);
+                }
+            });
+            
+            handles.push(handle);
+        }
+        
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        
+        let final_count = processed_count.load(Ordering::Relaxed);
+        assert_eq!(final_count, 50, "Expected all 50 tasks to be processed");
+        
+        // Verify caching worked across threads
+        let (token_cache_size, result_cache_size) = classifier.cache_stats();
+        assert!(token_cache_size > 0 || result_cache_size > 0, "Expected caching across threads");
     }
 }

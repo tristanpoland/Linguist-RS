@@ -11,7 +11,7 @@ use crate::strategy::Strategy;
 const SEARCH_SCOPE: usize = 2;
 
 /// XML detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Xml;
 
 impl Strategy for Xml {

@@ -10,7 +10,7 @@ use crate::language::Language;
 use crate::strategy::Strategy;
 
 /// Filename-based language detection strategy
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Filename;
 
 impl Strategy for Filename {

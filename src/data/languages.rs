@@ -4,9 +4,6 @@
 //! and preparing the necessary indices for fast language lookups.
 
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
 use std::sync::Once;
 
 use serde::{Deserialize, Serialize};
@@ -15,49 +12,26 @@ use serde_yaml::Value;
 use crate::language::Language;
 use crate::Result;
 
-// Path to the included languages.yml file
-const LANGUAGES_DATA_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/languages.yml");
-
-// Path to the included popular.yml file
-const POPULAR_DATA_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/data/popular.yml");
+// Compile-time inclusion of YAML files
+const LANGUAGES_YML: &str = include_str!("../../data/languages.yml");
+const POPULAR_YML: &str = include_str!("../../data/popular.yml");
 
 // Static initialization for the language data
 static INIT: Once = Once::new();
-static mut LANGUAGES_DATA: Option<String> = None;
 static mut POPULAR_DATA: Option<Vec<String>> = None;
 
-/// Load the language data from the embedded languages.yml file
-fn load_languages_yml() -> Result<String> {
-    unsafe {
-        INIT.call_once(|| {
-            // Load the languages.yml file
-            let mut file = File::open(LANGUAGES_DATA_PATH).expect("Failed to open languages.yml");
-            let mut contents = String::new();
-            file.read_to_string(&mut contents).expect("Failed to read languages.yml");
-            LANGUAGES_DATA = Some(contents);
-            
-            // Load the popular.yml file
-            let mut file = File::open(POPULAR_DATA_PATH).expect("Failed to open popular.yml");
-            let mut contents = String::new();
-            file.read_to_string(&mut contents).expect("Failed to read popular.yml");
-            
-            // Parse the YAML data
-            let popular: Vec<String> = serde_yaml::from_str(&contents).expect("Failed to parse popular.yml");
-            POPULAR_DATA = Some(popular);
-        });
-        
-        Ok(LANGUAGES_DATA.as_ref().unwrap().clone())
-    }
+/// Load the language data from the embedded languages.yml file (now at compile time)
+fn load_languages_yml() -> Result<&'static str> {
+    Ok(LANGUAGES_YML)
 }
 
 /// Get the list of popular language names
 fn get_popular_languages() -> Result<Vec<String>> {
     unsafe {
-        if POPULAR_DATA.is_none() {
-            // Ensure languages.yml is loaded, which also loads popular.yml
-            load_languages_yml()?;
-        }
-        
+        INIT.call_once(|| {
+            let popular: Vec<String> = serde_yaml::from_str(POPULAR_YML).expect("Failed to parse popular.yml");
+            POPULAR_DATA = Some(popular);
+        });
         Ok(POPULAR_DATA.as_ref().unwrap().clone())
     }
 }

@@ -10,7 +10,6 @@ use git2::Repository as GitRepo;
 
 use linguist::blob::{FileBlob, BlobHelper};  // Added BlobHelper trait import
 use linguist::repository::DirectoryAnalyzer;
-use linguist::threading::ThreadingConfig;
 
 #[derive(Parser)]
 #[clap(name = "linguist")]
@@ -49,13 +48,6 @@ enum Commands {
         #[clap(short, long)]
         json: bool,
         
-        /// Number of worker threads for parallel processing
-        #[clap(short = 't', long, default_value = "0")]
-        threads: usize,
-        
-        /// Enable parallel processing
-        #[clap(long)]
-        parallel: bool,
     },
 }
 
@@ -129,7 +121,7 @@ fn main() {
                 }
             }
         },
-        Commands::Analyze { path, breakdown, percentage, json, threads, parallel } => {
+        Commands::Analyze { path, breakdown, percentage, json } => {
             if !path.exists() {
                 eprintln!("Error: Path not found: {}", path.display());
                 process::exit(1);
@@ -143,17 +135,8 @@ fn main() {
                 // TODO: Implement Git repository analysis
             }
             
-            // Create directory analyzer with optional parallel processing
-            let mut analyzer = if parallel || threads > 0 {
-                let mut config = ThreadingConfig::default();
-                if threads > 0 {
-                    config.worker_threads = threads;
-                    config.io_threads = threads.min(8);
-                }
-                DirectoryAnalyzer::with_threading(&path, config)
-            } else {
-                DirectoryAnalyzer::new(&path)
-            };
+            // Create directory analyzer with parallel processing
+            let mut analyzer = DirectoryAnalyzer::new(&path);
             
             match analyzer.analyze() {
                 Ok(stats) => {

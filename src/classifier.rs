@@ -8,7 +8,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use rayon::prelude::*;
-use crossbeam_channel::{bounded, Receiver, Sender};
 use dashmap::DashMap;
 
 use crate::blob::BlobHelper;
@@ -232,7 +231,7 @@ impl ParallelClassifier {
         Self {
             token_cache: Arc::new(DashMap::new()),
             result_cache: Arc::new(DashMap::new()),
-            worker_count: num_cpus::get(),
+            worker_count: std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4),
         }
     }
     

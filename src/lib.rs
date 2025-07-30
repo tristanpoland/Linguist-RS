@@ -10,7 +10,6 @@ pub mod heuristics;
 pub mod language;
 pub mod repository;
 pub mod strategy;
-pub mod threading;
 pub mod vendor;
 pub mod data;
 
@@ -107,7 +106,7 @@ pub fn detect<B: BlobHelper + ?Sized>(blob: &B, allow_empty: bool) -> Option<Lan
     }
 }
 
-/// Detects the language of a blob using parallel strategy execution.
+/// Detects the language of a blob (simplified from parallel version).
 ///
 /// # Arguments
 ///
@@ -118,22 +117,8 @@ pub fn detect<B: BlobHelper + ?Sized>(blob: &B, allow_empty: bool) -> Option<Lan
 ///
 /// * `Option<Language>` - The detected language or None if undetermined
 pub fn detect_parallel<B: BlobHelper + Send + Sync + 'static>(blob: Arc<B>, allow_empty: bool) -> Option<Language> {
-    use threading::ParallelStrategyExecutor;
-    use futures::executor::block_on;
-    
-    // Bail early if the blob is binary or empty
-    if blob.likely_binary() || blob.is_binary() || (!allow_empty && blob.is_empty()) {
-        return None;
-    }
-    
-    // Use parallel strategy execution
-    let executor = ParallelStrategyExecutor::new(threading::ThreadingConfig::default());
-    let strategies = STRATEGIES.clone();
-    
-    let results = block_on(executor.execute_strategies_parallel(blob, strategies));
-    
-    // Return the first language found
-    results.into_iter().next()
+    // Simplified to use the regular detect function
+    detect(blob.as_ref(), allow_empty)
 }
 
 /// Batch detect languages for multiple blobs in parallel
